@@ -8,13 +8,14 @@ interface Estimate {
   suggestion: string;
   variety: number;
   score: number;
+  meterPercent: number;
 }
 
 const PRESETS = [
   { label: 'Classic weak', value: 'password123' },
   { label: 'Better with mix', value: 'C@ts4Life' },
-  { label: 'Passphrase', value: 'giraffe planet dance 2024!' },
-  { label: 'Super strong', value: 'Zy9!mN&QpL#7' }
+  { label: 'Passphrase', value: 'correct horse battery staple' },
+  { label: 'Super strong', value: '7*JGiULWFJtydsK*VdpwtGJw' }
 ];
 
 const INFO = {
@@ -41,16 +42,32 @@ function varietyLabel(variety: number) {
   return map[variety - 1] ?? 'no variety yet';
 }
 
+function clamp (n: number, min: number, max: number) {
+  return Math.min(Math.max(n, min), max);
+}
+
+function meterPercentFromGuessesLog10(guessesLog10: number) {
+  const min = 2; // ~100 guesses
+  const max = 18; // ~1e18 guesses (~century at 1e10 guesses/sec)
+  const t = clamp((guessesLog10 - min) / (max - min), 0, 1);
+
+  const eased = 1 - Math.pow(1 - t, 2); // ease-out
+
+  return eased * 100;
+}
+
 function scorePassword(password: string): Estimate {
   const result = zxcvbn(password);
   const variety = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((regex) => regex.test(password)).length;
   const entropy = Math.max(0, Math.round(result.guesses_log10 * LOG2_10));
-  const crackSeconds = result.crack_times_seconds.offline_fast_hashing_1e10_per_second;
-  const crackTime = result.crack_times_display.offline_fast_hashing_1e10_per_second;
+  const crackSeconds = Number(result.crack_times_seconds.offline_fast_hashing_1e10_per_second);
+  const crackTime = String(result.crack_times_display.offline_fast_hashing_1e10_per_second);
   const feedback =
     password.length === 0
       ? 'Type a password to see how strong it is!'
       : result.feedback.warning || result.feedback.suggestions[0] || 'Nice job! This looks strong.';
+
+    console.log(result);
 
   return {
     entropy,
@@ -58,7 +75,8 @@ function scorePassword(password: string): Estimate {
     crackTime,
     suggestion: feedback,
     variety,
-    score: result.score
+    score: result.score,
+    meterPercent: meterPercentFromGuessesLog10(result.guesses_log10)
   };
 }
 
@@ -110,7 +128,8 @@ function App() {
             </div>
           </div>
           <div className="meter-bar" aria-label={`Strength: ${level.label}`}>
-            <div className="fill" style={{ width: `${(estimate.score + 1) * 20}%`, background: level.color }} />
+            {/* <div className="fill" style={{ width: `${(estimate.score + 1) * 20}%`, background: level.color }} /> */}
+            <div className="fill" style={{ width: `${estimate.meterPercent}%`, background: level.color }} />
           </div>
           <p className="crack-time">
             Estimated crack time: <strong>{estimate.crackTime}</strong>
