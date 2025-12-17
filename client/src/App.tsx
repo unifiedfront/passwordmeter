@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import zxcvbn from 'zxcvbn';
 
 interface Estimate {
   entropy: number;
