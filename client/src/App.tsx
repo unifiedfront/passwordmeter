@@ -7,6 +7,7 @@ interface Estimate {
   crackTime: string;
   suggestion: string;
   variety: number;
+  score: number;
 }
 
 const PRESETS = [
@@ -22,21 +23,17 @@ const INFO = {
 };
 
 const LEVELS = [
-  { minEntropy: 0, label: 'Very weak', color: '#ef4444' },
-  { minEntropy: 30, label: 'Okay', color: '#f59e0b' },
-  { minEntropy: 45, label: 'Strong', color: '#10b981' },
-  { minEntropy: 60, label: 'Excellent', color: '#14b8a6' }
+  { score: 0, label: 'Very weak', color: '#ef4444' },
+  { score: 1, label: 'Weak', color: '#f97316' },
+  { score: 2, label: 'Okay', color: '#f59e0b' },
+  { score: 3, label: 'Strong', color: '#10b981' },
+  { score: 4, label: 'Excellent', color: '#14b8a6' }
 ];
 
-const CHARACTER_SETS = {
-  lower: 'abcdefghijklmnopqrstuvwxyz'.length,
-  upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.length,
-  digits: '0123456789'.length,
-  symbols: "!@#$%^&*()-_=+[]{};:'\",.<>/?`~|".length
-};
+const LOG2_10 = Math.LN10 / Math.LN2;
 
-function strengthFromEntropy(entropy: number) {
-  return LEVELS.reduce((current, level) => (entropy >= level.minEntropy ? level : current), LEVELS[0]);
+function strengthFromScore(score: number) {
+  return LEVELS.find((level) => level.score === score) ?? LEVELS[0];
 }
 
 function varietyLabel(variety: number) {
@@ -44,87 +41,36 @@ function varietyLabel(variety: number) {
   return map[variety - 1] ?? 'no variety yet';
 }
 
-function estimateEntropy(password: string) {
-  let charsetSize = 0;
-  if (/[a-z]/.test(password)) charsetSize += CHARACTER_SETS.lower;
-  if (/[A-Z]/.test(password)) charsetSize += CHARACTER_SETS.upper;
-  if (/[0-9]/.test(password)) charsetSize += CHARACTER_SETS.digits;
-  if (/[^a-zA-Z0-9]/.test(password)) charsetSize += CHARACTER_SETS.symbols;
-  const length = password.length;
-  if (length === 0 || charsetSize === 0) return 0;
-  return Math.round(length * Math.log2(charsetSize));
-}
-
-function estimateCrackTimeSeconds(password: string) {
-  const entropy = estimateEntropy(password);
-  const guessesPerSecond = 1e10; // optimistic attacker speed
-  const totalGuesses = Math.pow(2, entropy);
-  return totalGuesses / guessesPerSecond / 2; // average case
-}
-
-function formatDuration(seconds: number) {
-  if (!isFinite(seconds) || seconds <= 0) return 'almost instantly';
-  const units: [number, string][] = [
-    [60, 'second'],
-    [60, 'minute'],
-    [24, 'hour'],
-    [365, 'day'],
-    [100, 'year']
-  ];
-
-  let value = seconds;
-  let unit = 'second';
-  for (const [step, name] of units) {
-    if (value < step) {
-      unit = name;
-      break;
-    }
-    value /= step;
-    unit = name;
-  }
-
-  const rounded = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
-  const suffix = rounded === 1 ? '' : 's';
-  return `${rounded} ${unit}${suffix}`;
-}
-
-function passwordFeedback(password: string) {
-  const entropy = estimateEntropy(password);
-  const variety = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((regex) => regex.test(password)).length;
-  const suggestions: string[] = [];
-
-  if (password.length < 12) suggestions.push('Try a longer password or passphrase.');
-  if (variety < 3) suggestions.push('Mix uppercase, lowercase, numbers, and symbols.');
-  if (!/\s/.test(password) && password.length >= 16) suggestions.push('Passphrases with spaces are memorable and strong.');
-  if (suggestions.length === 0) suggestions.push('Nice job! This looks strong.');
-
-  return { entropy, variety, suggestions };
-}
-
 function scorePassword(password: string): Estimate {
-  const entropy = estimateEntropy(password);
-  const crackSeconds = estimateCrackTimeSeconds(password);
-  const feedback = passwordFeedback(password);
+  const result = zxcvbn(password);
+  const variety = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((regex) => regex.test(password)).length;
+  const entropy = Math.max(0, Math.round(result.guesses_log10 * LOG2_10));
+  const crackSeconds = result.crack_times_seconds.offline_fast_hashing_1e10_per_second;
+  const crackTime = result.crack_times_display.offline_fast_hashing_1e10_per_second;
+  const feedback =
+    password.length === 0
+      ? 'Type a password to see how strong it is!'
+      : result.feedback.warning || result.feedback.suggestions[0] || 'Nice job! This looks strong.';
 
   return {
     entropy,
     crackSeconds,
-    crackTime: formatDuration(crackSeconds),
-    suggestion: password.length ? feedback.suggestions[0] : 'Type a password to see how strong it is!',
-    variety: feedback.variety
+    crackTime,
+    suggestion: feedback,
+    variety,
+    score: result.score
   };
 }
 
 function App() {
   const [password, setPassword] = useState('password123');
   const estimate = useMemo(() => scorePassword(password), [password]);
-  const level = useMemo(() => strengthFromEntropy(estimate.entropy), [estimate.entropy]);
+  const level = useMemo(() => strengthFromScore(estimate.score), [estimate.score]);
 
   return (
     <div className="page">
       <header className="hero">
         <div>
-          <p className="eyebrow">Career Fair Demo</p>
           <h1>Password Strength Lab</h1>
           <p className="subtitle">
             Type a password or pick a preset to see how long it might take a robot to guess it. Then learn how MFA and
@@ -164,7 +110,7 @@ function App() {
             </div>
           </div>
           <div className="meter-bar" aria-label={`Strength: ${level.label}`}>
-            <div className="fill" style={{ width: `${Math.min(estimate.entropy, 80) + 20}%`, background: level.color }} />
+            <div className="fill" style={{ width: `${(estimate.score + 1) * 20}%`, background: level.color }} />
           </div>
           <p className="crack-time">
             Estimated crack time: <strong>{estimate.crackTime}</strong>
