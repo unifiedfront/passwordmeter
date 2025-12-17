@@ -1,6 +1,6 @@
 # Password Strength Lab
 
-A simple TypeScript demo that runs entirely in the browser (Vite + React) to visualize password strength, crack-time estimates, and quick explainers for MFA and passkeys. The strength calculation uses `zxcvbn` so weak passwords show near-instant crack times similar to popular password checkers.
+A simple TypeScript demo that runs entirely in the browser (Vite + React) to visualize password strength, crack-time estimates, and quick explainers for MFA and passkeys.
 
 ## Project layout
 - `client/`: React single-page app with a self-contained strength calculator.

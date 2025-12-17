@@ -23,11 +23,17 @@ const INFO = {
 
 const LEVELS = [
   { minEntropy: 0, label: 'Very weak', color: '#ef4444' },
-  { minEntropy: 28, label: 'Weak', color: '#f87171' },
-  { minEntropy: 36, label: 'Okay', color: '#f59e0b' },
+  { minEntropy: 30, label: 'Okay', color: '#f59e0b' },
   { minEntropy: 45, label: 'Strong', color: '#10b981' },
   { minEntropy: 60, label: 'Excellent', color: '#14b8a6' }
 ];
+
+const CHARACTER_SETS = {
+  lower: 'abcdefghijklmnopqrstuvwxyz'.length,
+  upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.length,
+  digits: '0123456789'.length,
+  symbols: "!@#$%^&*()-_=+[]{};:'\",.<>/?`~|".length
+};
 
 function strengthFromEntropy(entropy: number) {
   return LEVELS.reduce((current, level) => (entropy >= level.minEntropy ? level : current), LEVELS[0]);
@@ -38,8 +44,25 @@ function varietyLabel(variety: number) {
   return map[variety - 1] ?? 'no variety yet';
 }
 
-function formatDuration(seconds: number, friendlyDisplay?: string) {
-  if (friendlyDisplay) return friendlyDisplay;
+function estimateEntropy(password: string) {
+  let charsetSize = 0;
+  if (/[a-z]/.test(password)) charsetSize += CHARACTER_SETS.lower;
+  if (/[A-Z]/.test(password)) charsetSize += CHARACTER_SETS.upper;
+  if (/[0-9]/.test(password)) charsetSize += CHARACTER_SETS.digits;
+  if (/[^a-zA-Z0-9]/.test(password)) charsetSize += CHARACTER_SETS.symbols;
+  const length = password.length;
+  if (length === 0 || charsetSize === 0) return 0;
+  return Math.round(length * Math.log2(charsetSize));
+}
+
+function estimateCrackTimeSeconds(password: string) {
+  const entropy = estimateEntropy(password);
+  const guessesPerSecond = 1e10; // optimistic attacker speed
+  const totalGuesses = Math.pow(2, entropy);
+  return totalGuesses / guessesPerSecond / 2; // average case
+}
+
+function formatDuration(seconds: number) {
   if (!isFinite(seconds) || seconds <= 0) return 'almost instantly';
   const units: [number, string][] = [
     [60, 'second'],
@@ -65,31 +88,30 @@ function formatDuration(seconds: number, friendlyDisplay?: string) {
   return `${rounded} ${unit}${suffix}`;
 }
 
-function scorePassword(password: string): Estimate {
-  if (!password) {
-    return {
-      entropy: 0,
-      crackSeconds: 0,
-      crackTime: 'Type a password to see how strong it is!',
-      suggestion: 'Type a password to see how strong it is!',
-      variety: 0
-    };
-  }
-
-  const result = zxcvbn(password);
-  const entropy = Math.max(0, Math.round(result.guesses_log10 * 3.32192809489));
-  const crackSeconds = result.crack_times_seconds.offline_fast_hashing_1e10_per_second;
-  const crackDisplay = result.crack_times_display.offline_fast_hashing_1e10_per_second;
+function passwordFeedback(password: string) {
+  const entropy = estimateEntropy(password);
   const variety = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((regex) => regex.test(password)).length;
-  const fallbackSuggestion =
-    result.feedback.warning || result.feedback.suggestions[0] || 'Passphrases with a mix of words and symbols are powerful.';
+  const suggestions: string[] = [];
+
+  if (password.length < 12) suggestions.push('Try a longer password or passphrase.');
+  if (variety < 3) suggestions.push('Mix uppercase, lowercase, numbers, and symbols.');
+  if (!/\s/.test(password) && password.length >= 16) suggestions.push('Passphrases with spaces are memorable and strong.');
+  if (suggestions.length === 0) suggestions.push('Nice job! This looks strong.');
+
+  return { entropy, variety, suggestions };
+}
+
+function scorePassword(password: string): Estimate {
+  const entropy = estimateEntropy(password);
+  const crackSeconds = estimateCrackTimeSeconds(password);
+  const feedback = passwordFeedback(password);
 
   return {
     entropy,
     crackSeconds,
-    crackTime: formatDuration(crackSeconds, crackDisplay),
-    suggestion: fallbackSuggestion,
-    variety
+    crackTime: formatDuration(crackSeconds),
+    suggestion: password.length ? feedback.suggestions[0] : 'Type a password to see how strong it is!',
+    variety: feedback.variety
   };
 }
 
@@ -102,6 +124,7 @@ function App() {
     <div className="page">
       <header className="hero">
         <div>
+          <p className="eyebrow">Career Fair Demo</p>
           <h1>Password Strength Lab</h1>
           <p className="subtitle">
             Type a password or pick a preset to see how long it might take a robot to guess it. Then learn how MFA and
