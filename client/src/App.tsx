@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import zxcvbn from 'zxcvbn';
 
+import { Tooltip } from './Tooltip';
+
 interface Estimate {
   entropy: number;
   crackSeconds: number;
@@ -12,10 +14,12 @@ interface Estimate {
 }
 
 const PRESETS = [
-  { label: 'Classic weak', value: 'password123' },
-  { label: 'Better with mix', value: 'C@ts4Life' },
+  { label: 'Very weak', value: 'password123' },
+  { label: 'Weak (pattern)', value: 'Summer2025!' },
+  { label: 'Okay', value: 'D0gz4Life' },
+  { label: 'Strong', value: 'D0gz4Life!!-v2' },
   { label: 'Passphrase', value: 'correct horse battery staple' },
-  { label: 'Super strong', value: '7*JGiULWFJtydsK*VdpwtGJw' }
+  { label: 'Random', value: '7*JGiULWFJtydsK*VdpwtGJw' }
 ];
 
 const INFO = {
@@ -46,22 +50,26 @@ function clamp (n: number, min: number, max: number) {
   return Math.min(Math.max(n, min), max);
 }
 
-function meterPercentFromGuessesLog10(guessesLog10: number) {
-  const min = 2; // ~100 guesses
-  const max = 18; // ~1e18 guesses (~century at 1e10 guesses/sec)
+function meterPercentFromGuessesLog10(guessesLog10: number, hasInput: boolean) {
+  const min = 3; // ~100 guesses
+  const max = 24; // ~1e18 guesses (~century at 1e10 guesses/sec)
   const t = clamp((guessesLog10 - min) / (max - min), 0, 1);
 
-  const eased = 1 - Math.pow(1 - t, 2); // ease-out
+  const gamma = 0.72;
+  const curved = Math.pow(t, gamma); // gamma correction
 
-  return eased * 100;
+  const pct = Math.round(curved * 100);
+
+  if (!hasInput) return 0;
+  return clamp(pct, 1, 100);
 }
 
 function scorePassword(password: string): Estimate {
   const result = zxcvbn(password);
   const variety = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((regex) => regex.test(password)).length;
   const entropy = Math.max(0, Math.round(result.guesses_log10 * LOG2_10));
-  const crackSeconds = Number(result.crack_times_seconds.offline_fast_hashing_1e10_per_second);
-  const crackTime = String(result.crack_times_display.offline_fast_hashing_1e10_per_second);
+  const crackSeconds = Number(result.crack_times_seconds.offline_slow_hashing_1e4_per_second); // offline_fast_hashing_1e10_per_second
+  const crackTime = String(result.crack_times_display.offline_slow_hashing_1e4_per_second);
   const feedback =
     password.length === 0
       ? 'Type a password to see how strong it is!'
@@ -76,7 +84,7 @@ function scorePassword(password: string): Estimate {
     suggestion: feedback,
     variety,
     score: result.score,
-    meterPercent: meterPercentFromGuessesLog10(result.guesses_log10)
+    meterPercent: meterPercentFromGuessesLog10(result.guesses_log10, password.length > 0)
   };
 }
 
@@ -120,7 +128,18 @@ function App() {
         <div className="meter">
           <div className="meter-header">
             <div>
-              <p className="label">Entropy score</p>
+              <p className="label">
+                Entropy score &nbsp;
+                <Tooltip
+                  label="What are entropy bits?"
+                  content={
+                    <>
+                      <p><strong>Entropy bits</strong> are a "how hard to guess" number.</p>
+                      <p>Each extra bit roughly means a guessing computer has to try about <strong>twice</strong> as many options.</p>
+                    </>
+                  }
+                />
+              </p>
               <p className="entropy">{estimate.entropy} bits</p>
             </div>
             <div className="strength" style={{ color: level.color }}>
@@ -128,7 +147,6 @@ function App() {
             </div>
           </div>
           <div className="meter-bar" aria-label={`Strength: ${level.label}`}>
-            {/* <div className="fill" style={{ width: `${(estimate.score + 1) * 20}%`, background: level.color }} /> */}
             <div className="fill" style={{ width: `${estimate.meterPercent}%`, background: level.color }} />
           </div>
           <p className="crack-time">
@@ -136,6 +154,14 @@ function App() {
           </p>
           <p className="variety">Character variety: {varietyLabel(estimate.variety)}</p>
           <p className="suggestion">{estimate.suggestion}</p>
+          <div className="callout">
+            <div className="callout-title">Reality check</div>
+            <ul>
+              <li><strong>Reused passwords</strong> can be broken instantly if they’re already leaked.</li>
+              <li>Crack times assume guessing - attackers often try <strong>breach lists</strong> first.</li>
+              <li><strong>MFA</strong> helps even if a password is guessed or reused.</li>
+            </ul>
+          </div>
         </div>
       </section>
 
